@@ -1,0 +1,17 @@
+# Normaliza line endings: LF no repositório, conversão automática no checkout
+* text=auto eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.toml text eol=lf
+*.env text eol=lf
+*.gitignore text eol=lf
+Dockerfile text eol=lf
+
+# Binários — sem conversão
+*.png binary
+*.jpg binary
+*.gif binary
+*.db binary

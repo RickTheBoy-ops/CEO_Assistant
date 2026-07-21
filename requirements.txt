@@ -1,0 +1,58 @@
+# =============================================================================
+# CEO Assistant — requirements.txt
+# Dependências Python da aplicação
+# Versões fixadas para reprodutibilidade (atualize com `pip-compile` regularmente)
+# =============================================================================
+
+# --- Web Framework & Servidor ASGI ---
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+python-multipart==0.0.12     # parsing de form-data no FastAPI
+
+# --- Validação de dados ---
+pydantic==2.10.3
+pydantic-settings==2.7.0     # carrega configurações do .env com type hints
+
+# --- Agente & Orquestração ---
+langgraph==0.2.60
+langchain==0.3.13
+langchain-core==0.3.28
+langchain-community==0.3.13
+
+# --- LLM Providers ---
+langchain-openai==0.2.14      # OpenAI / GPT-4o
+langchain-anthropic==0.3.3    # Claude
+ollama==0.4.4                 # Ollama local (biblioteca oficial Python)
+
+# --- RAG & Banco Vetorial ---
+chromadb==0.6.3               # banco vetorial local com persistência
+langchain-chroma==0.1.4       # integração LangChain ↔ ChromaDB
+
+# --- Embeddings (fallback local sem GPU) ---
+sentence-transformers==3.3.1  # embeddings locais (modelo all-MiniLM-L6-v2)
+
+# --- Conectores de dados ---
+gspread==6.1.4                # Google Sheets via Service Account
+google-auth==2.37.0           # autenticação Google OAuth2
+psycopg2-binary==2.9.10       # PostgreSQL
+httpx==0.28.1                 # cliente HTTP assíncrono (para REST APIs externas)
+aiohttp==3.11.11              # alternativa async para streaming
+
+# --- Cache & Rate Limiting ---
+redis==5.2.1                  # cliente Redis para rate limiting e cache
+aioredis==2.0.1               # cliente Redis assíncrono
+
+# --- Banco de dados de logs ---
+aiosqlite==0.20.0             # SQLite assíncrono para logs de interação
+
+# --- Utilitários ---
+python-dotenv==1.0.1          # carrega .env em desenvolvimento local
+structlog==24.4.0             # logging estruturado (JSON-friendly)
+tenacity==9.0.0               # retry com backoff exponencial
+arrow==1.3.0                  # manipulação de datas humanizada
+
+# --- Testes ---
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-cov==6.0.0
+httpx==0.28.1                 # client para testar endpoints FastAPI (TestClient)

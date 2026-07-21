@@ -1,0 +1,40 @@
+.env
+secrets/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# IDEs
+.vscode/settings.json
+.idea/
+*.swp
+
+# Testes e cobertura
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Docker volumes locais (se montados como diretório)
+data/
+
+# Logs
+*.log
+logs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ChromaDB
+chroma_db/
+
+PortableGit/
+PortableGit.exe
+

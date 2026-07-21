@@ -1,0 +1,182 @@
+# =============================================================================
+# CEO Assistant — docker-compose.yml
+# Orquestra: Evolution API + PostgreSQL + Redis + app FastAPI (webhook receiver)
+#
+# Rede interna: ceo_net (bridge)
+# Todos os serviços se comunicam pelo nome do serviço como hostname DNS.
+# Apenas as portas necessárias são expostas para o host.
+# =============================================================================
+
+version: "3.9"
+
+networks:
+  ceo_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  evolution_instances:       # instâncias QR / sessões Baileys
+  evolution_store:           # store de mensagens da Evolution API
+  chroma_data:               # banco vetorial ChromaDB (persistido)
+  sqlite_data:               # logs de interação em SQLite
+
+# ---------------------------------------------------------------------------
+# SERVIÇOS
+# ---------------------------------------------------------------------------
+services:
+
+  # --------------------------------------------------------------------------
+  # PostgreSQL — usado pela Evolution API para persistência de dados
+  # --------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: ceo_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-evolution}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-evolution_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-evolution}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ceo_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-evolution}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --------------------------------------------------------------------------
+  # Redis — cache de sessão, filas e rate limiting
+  # --------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: ceo_redis
+    restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redis_pass} --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - ceo_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_pass}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --------------------------------------------------------------------------
+  # Evolution API — gateway WhatsApp (Baileys)
+  # Documentação: https://doc.evolution-api.com
+  # --------------------------------------------------------------------------
+  evolution_api:
+    image: atendai/evolution-api:latest
+    container_name: ceo_evolution
+    restart: unless-stopped
+    ports:
+      - "${EVOLUTION_HOST_PORT:-8080}:8080"   # porta exposta ao host para gerenciar via dashboard/curl
+    environment:
+      # --- Servidor ---
+      SERVER_URL: ${EVOLUTION_BASE_URL:-http://localhost:8080}
+      SERVER_PORT: "8080"
+
+      # --- Autenticação global ---
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY}
+      AUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES: "true"
+
+      # --- Banco de dados ---
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: "postgresql"
+      DATABASE_CONNECTION_URI: >-
+        postgresql://${POSTGRES_USER:-evolution}:${POSTGRES_PASSWORD:-evolution_pass}@postgres:5432/${POSTGRES_DB:-evolution}
+      DATABASE_CONNECTION_CLIENT_NAME: "evolution_client"
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_MESSAGE_UPDATE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "true"
+      DATABASE_SAVE_DATA_CHATS: "true"
+
+      # --- Redis ---
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://:${REDIS_PASSWORD:-redis_pass}@redis:6379/1
+      CACHE_REDIS_PREFIX_KEY: "evolution"
+      CACHE_REDIS_SAVE_INSTANCES: "true"
+      CACHE_LOCAL_ENABLED: "false"
+
+      # --- Webhook global (aponta para nossa app FastAPI) ---
+      # O webhook é configurado por instância via API, mas podemos definir um global aqui
+      WEBHOOK_GLOBAL_ENABLED: "false"   # configuraremos por instância via API
+      WEBHOOK_GLOBAL_URL: ""
+      WEBHOOK_EVENTS_MESSAGES_UPSERT: "true"
+      WEBHOOK_EVENTS_CONNECTION_UPDATE: "true"
+
+      # --- Logs ---
+      LOG_LEVEL: "ERROR,WARN,DEBUG,INFO,LOG,VERBOSE,DARK,WEBHOOKS"
+      LOG_COLOR: "true"
+      LOG_BAILEYS: "error"
+
+      # --- Instâncias ---
+      DEL_INSTANCE: "false"
+      CONFIG_SESSION_PHONE_CLIENT: "CEO Assistant"
+      CONFIG_SESSION_PHONE_NAME: "Chrome"
+
+      # --- QR Code via base64 (facilita scan remoto) ---
+      QRCODE_LIMIT: "30"
+      QRCODE_COLOR: "#000000"
+
+    volumes:
+      - evolution_instances:/evolution/instances
+      - evolution_store:/evolution/store
+    networks:
+      - ceo_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # --------------------------------------------------------------------------
+  # CEO Assistant App — FastAPI (webhook receiver + agente LangGraph)
+  # --------------------------------------------------------------------------
+  ceo_app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ceo_assistant
+    restart: unless-stopped
+    ports:
+      - "${APP_HOST_PORT:-8000}:8000"   # endpoint de webhook exposto ao host (ou via ngrok/reverse proxy)
+    environment:
+      # Carrega todas as variáveis do .env automaticamente via Docker Compose
+      - EVOLUTION_API_KEY=${EVOLUTION_API_KEY}
+      - EVOLUTION_BASE_URL=${EVOLUTION_BASE_URL:-http://evolution_api:8080}
+      - EVOLUTION_INSTANCE_NAME=${EVOLUTION_INSTANCE_NAME:-WHATSAPP-BAILEYS}
+      - CEO_WHATSAPP_NUMBER=${CEO_WHATSAPP_NUMBER}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - LLM_MODEL=${LLM_MODEL:-llama3}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-redis_pass}@redis:6379/0
+      - CHROMA_PERSIST_DIR=/data/chroma
+      - SQLITE_DB_PATH=/data/sqlite/interactions.db
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - RATE_LIMIT_REQUESTS=${RATE_LIMIT_REQUESTS:-10}
+      - RATE_LIMIT_WINDOW_SECONDS=${RATE_LIMIT_WINDOW_SECONDS:-60}
+      - GOOGLE_SHEETS_CREDENTIALS_PATH=${GOOGLE_SHEETS_CREDENTIALS_PATH:-/app/secrets/google_credentials.json}
+      - POSTGRES_APP_DSN=${POSTGRES_APP_DSN:-}
+    volumes:
+      - chroma_data:/data/chroma
+      - sqlite_data:/data/sqlite
+      - ./secrets:/app/secrets:ro   # credenciais Google Sheets (somente leitura)
+    networks:
+      - ceo_net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      evolution_api:
+        condition: service_started
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # permite acessar Ollama rodando no host
